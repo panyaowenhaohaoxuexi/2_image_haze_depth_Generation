@@ -11,12 +11,12 @@ conda activate CoA
 pip install -r requirements.txt
 ```
 
-如果 `CoA` 环境里已经安装了匹配 CUDA 的 `torch`，可以先保留现有版本，只安装缺失包。
+如果 `XXX` 环境里已经安装了匹配 CUDA 的 `torch`，可以先保留现有版本，只安装缺失包。
 
 ## 运行方式
 
 ```powershell
-conda activate CoA
+conda activate XXX
 python batch_asm_haze.py `
   --vis_dir F:\path\to\vis `
   --ir_dir F:\path\to\ir `
