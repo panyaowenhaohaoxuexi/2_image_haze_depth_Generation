@@ -83,6 +83,8 @@ python batch_asm_haze.py `
 ```python
 "IS_METRIC_DEPTH": True
 "DEPTH_SCALE": 80.0
+"DEPTH_SMOOTH_SIGMA": 9.0
+"HAZE_FIELD_SMOOTH_SIGMA": 15.0
 ```
 
 两种模式必须区分：
@@ -96,6 +98,13 @@ python batch_asm_haze.py `
 2. 查看该位置附近模型输出的相对深度均值，记为 `relative_d`。
 3. 计算 `depth_scale = known_distance_m / relative_d`。
 4. 用新的比例运行：`--no-is_metric_depth --depth_scale 你的比例`。
+
+雾场平滑参数：
+
+- `--depth_smooth_sigma`：在计算透射率前平滑深度，减少深度噪声。
+- `--haze_field_smooth_sigma`：在合成加雾图和保存 fogmap 前平滑最终透射率/雾场，使 fogmap 更低频、更少结构纹理。
+- 如果 fogmap 偏粗糙，优先增大 `--haze_field_smooth_sigma`。
+- If sky transitions look hard, adjust `SKY_BLUR_SIGMA` in `CONFIG`, or add a dedicated `--sky_blur_sigma` CLI option in a separate change.
 
 ## 可见光与红外配对规则
 

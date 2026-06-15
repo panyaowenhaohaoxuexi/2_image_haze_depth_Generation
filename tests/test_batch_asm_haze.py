@@ -56,6 +56,7 @@ def test_asm_uses_sky_soft_mask_and_koschmieder_beta():
         atmospheric_light,
         visibility_m=100.0,
         t_sky=0.07,
+        haze_field_smooth_sigma=0.0,
     )
 
     expected_ground_t = np.exp(-(3.912 / 100.0) * 10.0)
@@ -110,6 +111,40 @@ def test_smooth_depth_for_haze_reduces_local_structure():
     assert smoothed[:, 0].mean() < smoothed[:, -1].mean()
 
 
+def test_haze_field_smoothing_reduces_local_structure():
+    image = np.ones((41, 41, 3), dtype=np.float32) * 0.2
+    depth_m = np.ones((41, 41), dtype=np.float32) * 20.0
+    depth_m[20, 20] = 80.0
+    sky_mask = np.zeros((41, 41), dtype=np.float32)
+    atmospheric_light = np.array([0.9, 0.9, 0.9], dtype=np.float32)
+
+    _, t_unsmoothed = apply_atmospheric_scattering(
+        image,
+        depth_m,
+        sky_mask,
+        atmospheric_light,
+        visibility_m=100.0,
+        t_sky=0.07,
+        haze_field_smooth_sigma=0.0,
+    )
+    _, t_smoothed = apply_atmospheric_scattering(
+        image,
+        depth_m,
+        sky_mask,
+        atmospheric_light,
+        visibility_m=100.0,
+        t_sky=0.07,
+        haze_field_smooth_sigma=5.0,
+    )
+
+    assert t_smoothed.dtype == np.float32
+    assert t_smoothed.min() >= 0.0
+    assert t_smoothed.max() <= 1.0
+    unsmoothed_jump = abs(float(t_unsmoothed[20, 20] - t_unsmoothed[20, 19]))
+    smoothed_jump = abs(float(t_smoothed[20, 20] - t_smoothed[20, 19]))
+    assert smoothed_jump < unsmoothed_jump
+
+
 def test_process_one_image_writes_three_uniform_outputs(tmp_path):
     class DummyDepthEstimator:
         def predict(self, image, target_hw):
@@ -136,6 +171,7 @@ def test_process_one_image_writes_three_uniform_outputs(tmp_path):
         t_sky=0.07,
         save_fogmap=True,
         depth_smooth_sigma=3.0,
+        haze_field_smooth_sigma=0.0,
     )
 
     process_one_image(

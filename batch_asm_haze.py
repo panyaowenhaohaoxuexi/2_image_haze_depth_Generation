@@ -39,6 +39,7 @@ CONFIG = {
     "T_SKY": 0.07,
     "DEPTH_SCALE": 80.0,
     "DEPTH_SMOOTH_SIGMA": 9.0,
+    "HAZE_FIELD_SMOOTH_SIGMA": 15.0,
     "DARK_CHANNEL_PATCH": 15,
     "DARK_CHANNEL_TOP_PERCENT": 0.001,
     "DEBUG_VISIBILITY": 100.0,
@@ -108,6 +109,12 @@ def parse_args() -> argparse.Namespace:
         type=float,
         default=CONFIG["DEPTH_SMOOTH_SIGMA"],
         help="Gaussian sigma for low-frequency haze depth; 0 disables smoothing.",
+    )
+    parser.add_argument(
+        "--haze_field_smooth_sigma",
+        type=float,
+        default=CONFIG["HAZE_FIELD_SMOOTH_SIGMA"],
+        help="Gaussian sigma for smoothing final transmission/fog field; 0 disables field smoothing.",
     )
     parser.add_argument(
         "--dark_channel_patch",
@@ -219,6 +226,21 @@ def smooth_depth_for_haze(depth_m: np.ndarray, *, sigma: float) -> np.ndarray:
         sigmaY=float(sigma),
         borderType=cv2.BORDER_REPLICATE,
     ).astype(np.float32)
+
+
+def smooth_transmission_for_fog_field(t_final: np.ndarray, *, sigma: float) -> np.ndarray:
+    t_final = np.asarray(t_final, dtype=np.float32)
+    if float(sigma) <= 0.0:
+        return np.clip(t_final, 0.0, 1.0).astype(np.float32)
+    require_runtime_dependencies()
+    smoothed = cv2.GaussianBlur(
+        t_final,
+        ksize=(0, 0),
+        sigmaX=float(sigma),
+        sigmaY=float(sigma),
+        borderType=cv2.BORDER_REPLICATE,
+    )
+    return np.clip(smoothed, 0.0, 1.0).astype(np.float32)
 
 
 class DepthEstimator:
@@ -391,6 +413,7 @@ def apply_atmospheric_scattering(
     *,
     visibility_m: float,
     t_sky: float,
+    haze_field_smooth_sigma: float = 0.0,
 ) -> tuple[np.ndarray, np.ndarray]:
     """严格使用 ASM 合成雾图。
 
@@ -402,6 +425,11 @@ def apply_atmospheric_scattering(
     sky = np.clip(sky_mask_soft.astype(np.float32), 0.0, 1.0)
     t_final = (1.0 - sky) * t_depth + sky * float(t_sky)
     t_final = np.clip(t_final, 0.0, 1.0).astype(np.float32)
+    # Smooth the final transmission field so haze images and fogmap labels share the same low-frequency fog field.
+    t_final = smooth_transmission_for_fog_field(
+        t_final,
+        sigma=haze_field_smooth_sigma,
+    )
     hazy = image * t_final[..., None] + atmospheric_light.reshape(1, 1, 3) * (
         1.0 - t_final[..., None]
     )
@@ -487,6 +515,7 @@ def process_one_image(
             atmospheric_light,
             visibility_m=visibility,
             t_sky=args.t_sky,
+            haze_field_smooth_sigma=args.haze_field_smooth_sigma,
         )
         tag = visibility_tag(visibility)
         out_path = out_dir / f"{stem}_{tag}.jpg"
@@ -508,6 +537,7 @@ def process_one_image(
             atmospheric_light,
             visibility_m=visibility,
             t_sky=args.t_sky,
+            haze_field_smooth_sigma=args.haze_field_smooth_sigma,
         )
         save_gray_float(debug_dir / f"{stem}_{visibility_tag(visibility)}_t_final.png", t_final)
 
