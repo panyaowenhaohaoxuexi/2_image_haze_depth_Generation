@@ -164,3 +164,37 @@ t_final = (1 - sky_mask_soft) * t_depth + sky_mask_soft * t_sky
 - 同一张图三档结果的空间雾分布一致，仅整体浓度递增。
 - 天空区域接近雾色，交界处没有硬边和破碎伪影。
 - 近处保留更多清晰纹理，远处更容易被雾遮挡。
+
+## 生成红外补全掩码 GT
+
+`generate_ir_completion_mask_gt.py` 用于在 hazy 和 `Transmission_Map_GT` 已经生成后，单独离线生成 `IR_Completion_Mask_GT`。该脚本不会读取 `hazy/` 目录，也不会根据含雾图像像素判断可见光是否失效；它只使用已有 `Transmission_Map_GT` 中的雾场标签。
+
+输出掩码为单通道二值 PNG：
+
+- `0`：可见光仍可用，进入自适应融合区域。
+- `255`：可见光基本完全失效，进入红外补全 / 红外完全替代区域。
+
+判定依据来自 `Transmission_Map_GT = round((1 - t_final) * 255)`：
+
+- `--t_occ 0.05` 对应 `fogmap >= 242`，表示可见光贡献低于 5% 时标记为补全区域。
+- `--t_occ 0.10` 对应 `fogmap >= 230`。
+- `--t_occ` 越大，补全区域越多；`--t_occ` 越小，补全区域越严格。
+- 如果掩码太碎，可增大 `--morph_kernel` 或 `--min_area`。
+
+运行示例：
+
+```powershell
+python generate_ir_completion_mask_gt.py
+```
+
+如果想直接在代码里固定参数，打开 `generate_ir_completion_mask_gt.py` 顶部的 `CONFIG` 修改路径和阈值，然后运行上面这一行即可。命令行参数仍然可以临时覆盖 `CONFIG`：
+
+```powershell
+python generate_ir_completion_mask_gt.py `
+  --transmission_root "F:\Dehaze_Paper\2_Dataset\1_main_benchmark\FLIR\train\Transmission_Map_GT" `
+  --out_root "F:\Dehaze_Paper\2_Dataset\1_main_benchmark\FLIR\train\IR_Completion_Mask_GT" `
+  --severity_names mist middle dense `
+  --t_occ 0.05 `
+  --morph_kernel 7 `
+  --min_area 64
+```
