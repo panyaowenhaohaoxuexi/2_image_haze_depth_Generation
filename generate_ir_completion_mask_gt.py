@@ -20,9 +20,9 @@ DEFAULT_SEVERITY_NAMES = ["mist", "middle", "dense"]
 
 CONFIG = {
     # 已有雾气浓度图根目录，内部应包含 mist/middle/dense 子目录。
-    "TRANSMISSION_ROOT": r"F:\Dehaze_Paper\2_Dataset\1_main_benchmark\FLIR\train\Transmission_Map_GT",
+    "TRANSMISSION_ROOT": r"F:/Dehaze_Paper/2_Dataset/1_main_benchmark/FLIR/test/Transmission_Map_GT",
     # 红外补全掩码输出根目录，脚本会在其中生成 mist/middle/dense 子目录。
-    "OUT_ROOT": r"F:\Dehaze_Paper\2_Dataset\1_main_benchmark\FLIR\train\IR_Completion_Mask_GT",
+    "OUT_ROOT": r"F:/Dehaze_Paper/2_Dataset/1_main_benchmark/FLIR/test/IR_Completion_Mask_GT",
     # 需要处理的雾强子目录名称，需与 Transmission_Map_GT 下的子目录一致。
     "SEVERITY_NAMES": DEFAULT_SEVERITY_NAMES,
     # 透射率失效阈值：t_final <= T_OCC 的像素会被标为 255（红外补全区域）。
