@@ -7,4 +7,5 @@ python batch_asm_haze.py `
   --visibilities 200 100 50 `
   --severity_names mist middle dense `
   --keep_input_name `
-  --save_fogmap
+  --save_fogmap `
+  --disable_sky_mask
