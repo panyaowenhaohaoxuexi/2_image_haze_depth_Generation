@@ -3,7 +3,6 @@ from argparse import Namespace
 from pathlib import Path
 
 import numpy as np
-import cv2
 from PIL import Image
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -77,7 +76,7 @@ def test_same_name_pairing_rule(tmp_path):
     assert paired == ir_dir / "abc.jpg"
 
 
-def test_fogmap_is_one_minus_t_heatmap(tmp_path):
+def test_fogmap_is_one_minus_t_grayscale_label(tmp_path):
     t_final = np.array(
         [
             [0.0, 0.25],
@@ -89,9 +88,10 @@ def test_fogmap_is_one_minus_t_heatmap(tmp_path):
 
     save_fogmap(out_path, t_final)
 
-    saved = np.asarray(Image.open(out_path))
-    scalar = ((1.0 - t_final) * 255.0 + 0.5).astype(np.uint8)
-    expected = cv2.cvtColor(cv2.applyColorMap(scalar, cv2.COLORMAP_JET), cv2.COLOR_BGR2RGB)
+    with Image.open(out_path) as image:
+        assert image.mode == "L"
+        saved = np.asarray(image)
+    expected = ((np.clip(1.0 - t_final, 0.0, 1.0) * 255.0 + 0.5)).astype(np.uint8)
     np.testing.assert_array_equal(saved, expected)
 
 
@@ -148,11 +148,20 @@ def test_process_one_image_writes_three_uniform_outputs(tmp_path):
         args=args,
     )
 
+    fog_means = {}
     for tag in ["V200", "V100", "V50"]:
         assert (out_dir / f"sample_{tag}.jpg").exists()
-        assert (fogmap_dir / f"sample_{tag}_fogmap.png").exists()
+        fog_path = fogmap_dir / f"sample_{tag}_fogmap.png"
+        assert fog_path.exists()
+        with Image.open(fog_path) as fog_image:
+            assert fog_image.mode == "L"
+            fog_array = np.asarray(fog_image)
+        assert fog_array.ndim == 2
+        assert fog_array.min() == fog_array.max()
+        fog_means[tag] = float(fog_array.mean())
 
     assert len(list(out_dir.glob("sample_*.jpg"))) == 3
+    assert fog_means["V50"] > fog_means["V100"] > fog_means["V200"]
     assert not (out_dir / "sample_V200_nf.jpg").exists()
     assert not (out_dir / "sample_V100_nf.jpg").exists()
     assert not (out_dir / "sample_V50_nf.jpg").exists()

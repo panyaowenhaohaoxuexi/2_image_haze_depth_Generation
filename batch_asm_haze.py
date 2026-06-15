@@ -137,7 +137,7 @@ def parse_args() -> argparse.Namespace:
         "--save_fogmap",
         action="store_true",
         default=CONFIG["SAVE_FOGMAP"],
-        help="Save single-channel uint8 fog concentration maps.",
+        help="Save single-channel uint8 fog concentration maps where 0=clear and 255=dense fog.",
     )
     return parser.parse_args()
 
@@ -182,13 +182,10 @@ def save_gray_float(path: Path, image: np.ndarray) -> None:
 
 
 def save_fogmap(path: Path, t_final: np.ndarray) -> None:
-    require_runtime_dependencies()
     path.parent.mkdir(parents=True, exist_ok=True)
     fog_map = 1.0 - np.asarray(t_final, dtype=np.float32)
     uint8 = (np.clip(fog_map, 0.0, 1.0) * 255.0 + 0.5).astype(np.uint8)
-    heatmap_bgr = cv2.applyColorMap(uint8, cv2.COLORMAP_JET)
-    heatmap_rgb = cv2.cvtColor(heatmap_bgr, cv2.COLOR_BGR2RGB)
-    Image.fromarray(heatmap_rgb, mode="RGB").save(path)
+    Image.fromarray(uint8, mode="L").save(path)
 
 
 def depth_to_meters(

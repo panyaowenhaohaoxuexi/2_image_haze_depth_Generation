@@ -28,6 +28,9 @@ python batch_asm_haze.py `
 - `原文件名_V200.jpg`
 - `原文件名_V100.jpg`
 - `原文件名_V50.jpg`
+- `out_haze/fogmap/原文件名_V200_fogmap.png`：单通道 uint8 雾气浓度图，0 表示无雾，255 表示雾最浓（需启用 `--save_fogmap`）。
+- `out_haze/fogmap/原文件名_V100_fogmap.png`：单通道 uint8 雾气浓度图，0 表示无雾，255 表示雾最浓（需启用 `--save_fogmap`）。
+- `out_haze/fogmap/原文件名_V50_fogmap.png`：单通道 uint8 雾气浓度图，0 表示无雾，255 表示雾最浓（需启用 `--save_fogmap`）。
 - `out_haze/debug/原文件名_depth.png`
 - `out_haze/debug/原文件名_sky_mask_soft.png`
 - `out_haze/debug/原文件名_V100_t_final.png`
@@ -143,6 +146,8 @@ t_final = (1 - sky_mask_soft) * t_depth + sky_mask_soft * t_sky
 - `*_depth.png`：深度可视化，检查是否近处浅/远处深。
 - `*_sky_mask_soft.png`：红外天空软掩膜，检查天空边界是否平滑。
 - `*_V100_t_final.png`：透射率图，检查近处透射率高、远处和天空透射率低。
+- `fogmap/*_fogmap.png`：雾气浓度图应为单通道灰度标签图，不应是 JET 彩色热力图。
+- 如果需要 JET 热力图，只能作为可视化辅助文件另存，不能覆盖 `fogmap` 标签输出。
 
 验收重点：
 
