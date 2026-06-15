@@ -1,0 +1,10 @@
+python batch_asm_haze.py `
+  --vis_dir "F:\Dehaze_Paper\2_Dataset\1_main_benchmark\FLIR\test\clear" `
+  --ir_dir "F:\Dehaze_Paper\2_Dataset\1_main_benchmark\FLIR\test\ir" `
+  --out_dir "F:\Dehaze_Paper\2_Dataset\1_main_benchmark\FLIR\test\hazy" `
+  --fogmap_dir "F:\Dehaze_Paper\2_Dataset\1_main_benchmark\FLIR\test\Transmission_Map_GT" `
+  --model_name_or_path "E:\Github_code_upload\2_image_haze_depth_Generation\models\Depth-Anything-V2-Metric-Outdoor-Large-hf" `
+  --visibilities 200 100 50 `
+  --severity_names mist middle dense `
+  --keep_input_name `
+  --save_fogmap
