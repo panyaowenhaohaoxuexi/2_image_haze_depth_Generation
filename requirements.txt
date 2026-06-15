@@ -1,0 +1,8 @@
+numpy
+pillow
+opencv-python
+scipy
+torch
+transformers==4.47.1
+tokenizers>=0.21,<0.22
+pytest
