@@ -38,6 +38,7 @@ CONFIG = {
     "VISIBILITIES": [200.0, 100.0, 50.0],
     "T_SKY": 0.07,
     "DEPTH_SCALE": 80.0,
+    "DEPTH_SMOOTH_SIGMA": 9.0,
     "DARK_CHANNEL_PATCH": 15,
     "DARK_CHANNEL_TOP_PERCENT": 0.001,
     "DEBUG_VISIBILITY": 100.0,
@@ -48,6 +49,7 @@ CONFIG = {
     "ATMOSPHERIC_LIGHT_MIN": 0.8,
     "ATMOSPHERIC_LIGHT_MAX": 0.95,
     "DISABLE_SKY_MASK": False,
+    "SAVE_FOGMAP": False,
 }
 
 IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png"}
@@ -102,6 +104,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--t_sky", type=float, default=CONFIG["T_SKY"])
     parser.add_argument("--depth_scale", type=float, default=CONFIG["DEPTH_SCALE"])
     parser.add_argument(
+        "--depth_smooth_sigma",
+        type=float,
+        default=CONFIG["DEPTH_SMOOTH_SIGMA"],
+        help="Gaussian sigma for low-frequency haze depth; 0 disables smoothing.",
+    )
+    parser.add_argument(
         "--dark_channel_patch",
         type=int,
         default=CONFIG["DARK_CHANNEL_PATCH"],
@@ -124,6 +132,12 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         default=CONFIG["DISABLE_SKY_MASK"],
         help="不使用红外/深度天空掩膜，完全按深度透射率加雾",
+    )
+    parser.add_argument(
+        "--save_fogmap",
+        action="store_true",
+        default=CONFIG["SAVE_FOGMAP"],
+        help="Save single-channel uint8 fog concentration maps.",
     )
     return parser.parse_args()
 
@@ -167,6 +181,16 @@ def save_gray_float(path: Path, image: np.ndarray) -> None:
     Image.fromarray(uint8, mode="L").save(path)
 
 
+def save_fogmap(path: Path, t_final: np.ndarray) -> None:
+    require_runtime_dependencies()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fog_map = 1.0 - np.asarray(t_final, dtype=np.float32)
+    uint8 = (np.clip(fog_map, 0.0, 1.0) * 255.0 + 0.5).astype(np.uint8)
+    heatmap_bgr = cv2.applyColorMap(uint8, cv2.COLORMAP_JET)
+    heatmap_rgb = cv2.cvtColor(heatmap_bgr, cv2.COLOR_BGR2RGB)
+    Image.fromarray(heatmap_rgb, mode="RGB").save(path)
+
+
 def depth_to_meters(
     raw_depth: np.ndarray,
     *,
@@ -184,6 +208,20 @@ def depth_to_meters(
     if is_metric_depth:
         return raw_depth, 1.0
     return raw_depth * float(depth_scale), float(depth_scale)
+
+
+def smooth_depth_for_haze(depth_m: np.ndarray, *, sigma: float) -> np.ndarray:
+    depth_m = np.asarray(depth_m, dtype=np.float32)
+    if float(sigma) <= 0.0:
+        return depth_m.copy()
+    require_runtime_dependencies()
+    return cv2.GaussianBlur(
+        depth_m,
+        ksize=(0, 0),
+        sigmaX=float(sigma),
+        sigmaY=float(sigma),
+        borderType=cv2.BORDER_REPLICATE,
+    ).astype(np.float32)
 
 
 class DepthEstimator:
@@ -394,6 +432,7 @@ def process_one_image(
     ir_dir: Path,
     out_dir: Path,
     debug_dir: Path,
+    fogmap_dir: Path,
     depth_estimator: DepthEstimator,
     args: argparse.Namespace,
 ) -> None:
@@ -406,6 +445,7 @@ def process_one_image(
         is_metric_depth=args.is_metric_depth,
         depth_scale=args.depth_scale,
     )
+    depth_for_haze = smooth_depth_for_haze(depth_m, sigma=args.depth_smooth_sigma)
     if args.is_metric_depth:
         print("[INFO] metric depth: depth_scale=1.0 effective")
     else:
@@ -418,13 +458,13 @@ def process_one_image(
         ir_path = find_paired_ir_path(vis_path, ir_dir)
         if ir_path is None:
             print(f"[WARN] 找不到配对红外图: {vis_path.name}，回退为纯深度阈值天空处理。")
-            sky_mask_soft = fallback_sky_mask_from_depth(depth_m)
+            sky_mask_soft = fallback_sky_mask_from_depth(depth_for_haze)
         else:
             try:
                 sky_mask_soft = generate_ir_sky_mask_soft(ir_path, (height, width))
             except Exception as exc:
                 print(f"[WARN] 红外天空掩膜失败: {ir_path} ({exc})，回退为纯深度阈值天空处理。")
-                sky_mask_soft = fallback_sky_mask_from_depth(depth_m)
+                sky_mask_soft = fallback_sky_mask_from_depth(depth_for_haze)
 
     atmospheric_light = estimate_atmospheric_light(
         image,
@@ -434,18 +474,18 @@ def process_one_image(
     print(
         "[INFO] A="
         f"{np.round(atmospheric_light, 4).tolist()}, "
-        f"depth_m range=({depth_m.min():.3f}, {depth_m.max():.3f})"
+        f"depth_m range=({depth_for_haze.min():.3f}, {depth_for_haze.max():.3f})"
     )
 
     stem = vis_path.stem
-    save_gray_float(debug_dir / f"{stem}_depth.png", normalize_for_debug(depth_m))
+    save_gray_float(debug_dir / f"{stem}_depth.png", normalize_for_debug(depth_for_haze))
     save_gray_float(debug_dir / f"{stem}_sky_mask_soft.png", sky_mask_soft)
 
     debug_t_saved = False
     for visibility in args.visibilities:
         hazy, t_final = apply_atmospheric_scattering(
             image,
-            depth_m,
+            depth_for_haze,
             sky_mask_soft,
             atmospheric_light,
             visibility_m=visibility,
@@ -455,6 +495,8 @@ def process_one_image(
         out_path = out_dir / f"{stem}_{tag}.jpg"
         save_rgb_float(out_path, hazy)
         print(f"[INFO] saved: {out_path}")
+        if args.save_fogmap:
+            save_fogmap(fogmap_dir / f"{stem}_{tag}_fogmap.png", t_final)
 
         if not debug_t_saved and abs(float(visibility) - float(args.debug_visibility)) < 1e-6:
             save_gray_float(debug_dir / f"{stem}_{tag}_t_final.png", t_final)
@@ -464,14 +506,13 @@ def process_one_image(
         visibility = float(args.visibilities[min(1, len(args.visibilities) - 1)])
         _, t_final = apply_atmospheric_scattering(
             image,
-            depth_m,
+            depth_for_haze,
             sky_mask_soft,
             atmospheric_light,
             visibility_m=visibility,
             t_sky=args.t_sky,
         )
         save_gray_float(debug_dir / f"{stem}_{visibility_tag(visibility)}_t_final.png", t_final)
-
 
 def main() -> None:
     args = parse_args()
@@ -481,8 +522,10 @@ def main() -> None:
     ir_dir = Path(args.ir_dir)
     out_dir = Path(args.out_dir)
     debug_dir = out_dir / "debug"
+    fogmap_dir = out_dir / "fogmap"
     out_dir.mkdir(parents=True, exist_ok=True)
     debug_dir.mkdir(parents=True, exist_ok=True)
+    fogmap_dir.mkdir(parents=True, exist_ok=True)
 
     images = list_images(vis_dir)
     if not images:
@@ -499,6 +542,7 @@ def main() -> None:
                 ir_dir=ir_dir,
                 out_dir=out_dir,
                 debug_dir=debug_dir,
+                fogmap_dir=fogmap_dir,
                 depth_estimator=depth_estimator,
                 args=args,
             )

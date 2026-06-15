@@ -1,7 +1,10 @@
 import sys
+from argparse import Namespace
 from pathlib import Path
 
 import numpy as np
+import cv2
+from PIL import Image
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
@@ -9,6 +12,9 @@ from batch_asm_haze import (
     apply_atmospheric_scattering,
     depth_to_meters,
     find_paired_ir_path,
+    process_one_image,
+    save_fogmap,
+    smooth_depth_for_haze,
 )
 
 
@@ -69,3 +75,84 @@ def test_same_name_pairing_rule(tmp_path):
     paired = find_paired_ir_path(vis_path, ir_dir)
 
     assert paired == ir_dir / "abc.jpg"
+
+
+def test_fogmap_is_one_minus_t_heatmap(tmp_path):
+    t_final = np.array(
+        [
+            [0.0, 0.25],
+            [0.5, 1.0],
+        ],
+        dtype=np.float32,
+    )
+    out_path = tmp_path / "fogmap.png"
+
+    save_fogmap(out_path, t_final)
+
+    saved = np.asarray(Image.open(out_path))
+    scalar = ((1.0 - t_final) * 255.0 + 0.5).astype(np.uint8)
+    expected = cv2.cvtColor(cv2.applyColorMap(scalar, cv2.COLORMAP_JET), cv2.COLOR_BGR2RGB)
+    np.testing.assert_array_equal(saved, expected)
+
+
+def test_smooth_depth_for_haze_reduces_local_structure():
+    depth_m = np.zeros((21, 21), dtype=np.float32)
+    depth_m[:, :10] = 10.0
+    depth_m[:, 10:] = 80.0
+    depth_m[10, 10] = 5.0
+
+    unsmoothed = smooth_depth_for_haze(depth_m, sigma=0.0)
+    smoothed = smooth_depth_for_haze(depth_m, sigma=3.0)
+
+    np.testing.assert_array_equal(unsmoothed, depth_m)
+    assert smoothed.dtype == np.float32
+    assert smoothed[10, 10] > depth_m[10, 10]
+    assert smoothed[:, 0].mean() < smoothed[:, -1].mean()
+
+
+def test_process_one_image_writes_three_uniform_outputs(tmp_path):
+    class DummyDepthEstimator:
+        def predict(self, image, target_hw):
+            return np.ones(target_hw, dtype=np.float32) * 10.0
+
+    vis_dir = tmp_path / "vis"
+    ir_dir = tmp_path / "ir"
+    out_dir = tmp_path / "out"
+    debug_dir = out_dir / "debug"
+    fogmap_dir = out_dir / "fogmap"
+    vis_dir.mkdir()
+    ir_dir.mkdir()
+    Image.fromarray(np.full((8, 8, 3), 80, dtype=np.uint8), mode="RGB").save(
+        vis_dir / "sample.jpg"
+    )
+
+    args = Namespace(
+        is_metric_depth=True,
+        depth_scale=80.0,
+        disable_sky_mask=True,
+        dark_channel_patch=3,
+        visibilities=[200.0, 100.0, 50.0],
+        debug_visibility=100.0,
+        t_sky=0.07,
+        save_fogmap=True,
+        depth_smooth_sigma=3.0,
+    )
+
+    process_one_image(
+        vis_path=vis_dir / "sample.jpg",
+        ir_dir=ir_dir,
+        out_dir=out_dir,
+        debug_dir=debug_dir,
+        fogmap_dir=fogmap_dir,
+        depth_estimator=DummyDepthEstimator(),
+        args=args,
+    )
+
+    for tag in ["V200", "V100", "V50"]:
+        assert (out_dir / f"sample_{tag}.jpg").exists()
+        assert (fogmap_dir / f"sample_{tag}_fogmap.png").exists()
+
+    assert len(list(out_dir.glob("sample_*.jpg"))) == 3
+    assert not (out_dir / "sample_V200_nf.jpg").exists()
+    assert not (out_dir / "sample_V100_nf.jpg").exists()
+    assert not (out_dir / "sample_V50_nf.jpg").exists()
