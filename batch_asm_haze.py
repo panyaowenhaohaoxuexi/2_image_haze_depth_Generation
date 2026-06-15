@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import argparse
 from pathlib import Path
-from typing import Iterable, Sequence
+from typing import Iterable, Optional, Sequence
 
 import numpy as np
 from PIL import Image
@@ -77,6 +77,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--vis_dir", default=CONFIG["VIS_DIR"], help="可见光图文件夹")
     parser.add_argument("--ir_dir", default=CONFIG["IR_DIR"], help="红外图文件夹")
     parser.add_argument("--out_dir", default=CONFIG["OUT_DIR"], help="输出文件夹")
+    parser.add_argument(
+        "--fogmap_dir",
+        default=None,
+        help="雾气浓度图输出文件夹；默认使用 out_dir/fogmap",
+    )
     parser.add_argument(
         "--model_name_or_path",
         default=CONFIG["MODEL_NAME_OR_PATH"],
@@ -146,6 +151,17 @@ def parse_args() -> argparse.Namespace:
         default=CONFIG["SAVE_FOGMAP"],
         help="Save single-channel uint8 fog concentration maps where 0=clear and 255=dense fog.",
     )
+    parser.add_argument(
+        "--severity_names",
+        nargs="+",
+        default=None,
+        help="每个能见度对应的输出子文件夹名，例如 mist middle dense",
+    )
+    parser.add_argument(
+        "--keep_input_name",
+        action="store_true",
+        help="含雾图保持输入文件名；fogmap 使用同主名 .png",
+    )
     return parser.parse_args()
 
 
@@ -193,6 +209,32 @@ def save_fogmap(path: Path, t_final: np.ndarray) -> None:
     fog_map = 1.0 - np.asarray(t_final, dtype=np.float32)
     uint8 = (np.clip(fog_map, 0.0, 1.0) * 255.0 + 0.5).astype(np.uint8)
     Image.fromarray(uint8, mode="L").save(path)
+
+
+def output_paths_for_visibility(
+    *,
+    vis_path: Path,
+    out_dir: Path,
+    fogmap_dir: Path,
+    tag: str,
+    severity_name: Optional[str],
+    keep_input_name: bool,
+) -> tuple[Path, Path]:
+    if severity_name:
+        hazy_dir = out_dir / severity_name
+        fog_dir = fogmap_dir / severity_name
+    else:
+        hazy_dir = out_dir
+        fog_dir = fogmap_dir
+
+    if keep_input_name:
+        hazy_name = vis_path.name
+        fogmap_name = f"{vis_path.stem}.png"
+    else:
+        hazy_name = f"{vis_path.stem}_{tag}.jpg"
+        fogmap_name = f"{vis_path.stem}_{tag}_fogmap.png"
+
+    return hazy_dir / hazy_name, fog_dir / fogmap_name
 
 
 def depth_to_meters(
@@ -507,7 +549,8 @@ def process_one_image(
     save_gray_float(debug_dir / f"{stem}_sky_mask_soft.png", sky_mask_soft)
 
     debug_t_saved = False
-    for visibility in args.visibilities:
+    severity_names = args.severity_names or [None] * len(args.visibilities)
+    for visibility, severity_name in zip(args.visibilities, severity_names):
         hazy, t_final = apply_atmospheric_scattering(
             image,
             depth_for_haze,
@@ -518,11 +561,18 @@ def process_one_image(
             haze_field_smooth_sigma=args.haze_field_smooth_sigma,
         )
         tag = visibility_tag(visibility)
-        out_path = out_dir / f"{stem}_{tag}.jpg"
+        out_path, fog_path = output_paths_for_visibility(
+            vis_path=vis_path,
+            out_dir=out_dir,
+            fogmap_dir=fogmap_dir,
+            tag=tag,
+            severity_name=severity_name,
+            keep_input_name=args.keep_input_name,
+        )
         save_rgb_float(out_path, hazy)
         print(f"[INFO] saved: {out_path}")
         if args.save_fogmap:
-            save_fogmap(fogmap_dir / f"{stem}_{tag}_fogmap.png", t_final)
+            save_fogmap(fog_path, t_final)
 
         if not debug_t_saved and abs(float(visibility) - float(args.debug_visibility)) < 1e-6:
             save_gray_float(debug_dir / f"{stem}_{tag}_t_final.png", t_final)
@@ -548,8 +598,13 @@ def main() -> None:
     vis_dir = Path(args.vis_dir)
     ir_dir = Path(args.ir_dir)
     out_dir = Path(args.out_dir)
+    if args.severity_names is not None and len(args.severity_names) != len(args.visibilities):
+        raise ValueError(
+            "--severity_names 数量必须与 --visibilities 数量一致: "
+            f"{len(args.severity_names)} != {len(args.visibilities)}"
+        )
     debug_dir = out_dir / "debug"
-    fogmap_dir = out_dir / "fogmap"
+    fogmap_dir = Path(args.fogmap_dir) if args.fogmap_dir else out_dir / "fogmap"
     out_dir.mkdir(parents=True, exist_ok=True)
     debug_dir.mkdir(parents=True, exist_ok=True)
     fogmap_dir.mkdir(parents=True, exist_ok=True)

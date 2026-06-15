@@ -145,16 +145,16 @@ def test_haze_field_smoothing_reduces_local_structure():
     assert smoothed_jump < unsmoothed_jump
 
 
-def test_process_one_image_writes_three_uniform_outputs(tmp_path):
+def test_process_one_image_writes_severity_dirs_with_input_names(tmp_path):
     class DummyDepthEstimator:
         def predict(self, image, target_hw):
             return np.ones(target_hw, dtype=np.float32) * 10.0
 
     vis_dir = tmp_path / "vis"
     ir_dir = tmp_path / "ir"
-    out_dir = tmp_path / "out"
+    out_dir = tmp_path / "hazy"
     debug_dir = out_dir / "debug"
-    fogmap_dir = out_dir / "fogmap"
+    fogmap_dir = tmp_path / "Transmission_Map_GT"
     vis_dir.mkdir()
     ir_dir.mkdir()
     Image.fromarray(np.full((8, 8, 3), 80, dtype=np.uint8), mode="RGB").save(
@@ -172,6 +172,8 @@ def test_process_one_image_writes_three_uniform_outputs(tmp_path):
         save_fogmap=True,
         depth_smooth_sigma=3.0,
         haze_field_smooth_sigma=0.0,
+        severity_names=["mist", "middle", "dense"],
+        keep_input_name=True,
     )
 
     process_one_image(
@@ -185,9 +187,13 @@ def test_process_one_image_writes_three_uniform_outputs(tmp_path):
     )
 
     fog_means = {}
-    for tag in ["V200", "V100", "V50"]:
-        assert (out_dir / f"sample_{tag}.jpg").exists()
-        fog_path = fogmap_dir / f"sample_{tag}_fogmap.png"
+    for severity, tag in [
+        ("mist", "V200"),
+        ("middle", "V100"),
+        ("dense", "V50"),
+    ]:
+        assert (out_dir / severity / "sample.jpg").exists()
+        fog_path = fogmap_dir / severity / "sample.png"
         assert fog_path.exists()
         with Image.open(fog_path) as fog_image:
             assert fog_image.mode == "L"
@@ -196,8 +202,7 @@ def test_process_one_image_writes_three_uniform_outputs(tmp_path):
         assert fog_array.min() == fog_array.max()
         fog_means[tag] = float(fog_array.mean())
 
-    assert len(list(out_dir.glob("sample_*.jpg"))) == 3
+    assert len(list(out_dir.glob("*/*.jpg"))) == 3
     assert fog_means["V50"] > fog_means["V100"] > fog_means["V200"]
-    assert not (out_dir / "sample_V200_nf.jpg").exists()
-    assert not (out_dir / "sample_V100_nf.jpg").exists()
-    assert not (out_dir / "sample_V50_nf.jpg").exists()
+    assert not (out_dir / "sample_V200.jpg").exists()
+    assert not (fogmap_dir / "sample_V200_fogmap.png").exists()
